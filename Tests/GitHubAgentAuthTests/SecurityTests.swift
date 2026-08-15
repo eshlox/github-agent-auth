@@ -111,6 +111,21 @@ final class SecurityTests: XCTestCase {
       "export EDITOR=vim\nexport LANG=en_US.UTF-8\n")
   }
 
+  func testReleaseScriptsBypassRestrictedGitHubCLIShim() throws {
+    let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+      .deletingLastPathComponent().deletingLastPathComponent()
+    for name in ["release-local.sh", "publish-homebrew-formula.sh"] {
+      let script = try String(
+        contentsOf: root.appendingPathComponent("scripts/\(name)"), encoding: .utf8)
+      XCTAssertTrue(script.contains("RELEASE_GH"), name)
+      XCTAssertFalse(script.contains("\ngh "), name)
+    }
+  }
+
+  func testProjectURLMatchesRepository() {
+    XCTAssertEqual(projectURL, "https://github.com/eshlox/github-agent-auth")
+  }
+
   private func configuration() -> Configuration {
     Configuration(
       allowedUID: 501, allowedGID: 20, workerUID: 499, workerGID: 499,

@@ -64,8 +64,16 @@ reviewed pull requests and required checks. Do not let the GitHub App bypass rul
 Authenticate the release operator:
 
 ```sh
-gh auth login -h github.com
-gh auth status
+/opt/homebrew/bin/gh auth login -h github.com
+/opt/homebrew/bin/gh auth status
+```
+
+Release scripts use `/opt/homebrew/bin/gh`, not the restricted AgentAuth `gh` shim. Set
+`RELEASE_GH` to another absolute trusted path when needed:
+
+```sh
+export RELEASE_GH=/absolute/path/to/gh
+"$RELEASE_GH" auth status -h github.com
 ```
 
 Configure signed release tags. Example with an SSH signing key registered on GitHub:

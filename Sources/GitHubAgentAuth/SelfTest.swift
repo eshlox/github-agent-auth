@@ -41,6 +41,8 @@ enum SelfTest {
     }
     try expect(apiBase.absoluteString == "https://api.github.com", "fixed API origin", &count)
     try expect(
+      projectURL == "https://github.com/eshlox/github-agent-auth", "fixed project URL", &count)
+    try expect(
       PermissionProfile.core.permissions == [
         "contents": "write", "pull_requests": "write", "metadata": "read",
       ], "core permission profile", &count)

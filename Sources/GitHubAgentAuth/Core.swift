@@ -5,6 +5,7 @@ let service = "net.eshlox.github-agent-auth"
 let serviceAccount = "_github-agent-auth"
 let gitHubHost = "github.com"
 let apiBase = URL(string: "https://api.github.com")!
+let projectURL = "https://github.com/eshlox/github-agent-auth"
 
 func brokerWorkerIdentity() throws -> (uid: uid_t, gid: gid_t) {
   guard let account = getpwnam(serviceAccount), account.pointee.pw_uid != 0 else {
