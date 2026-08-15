@@ -159,5 +159,23 @@ spctl --assess --type execute --verbose=2 "$binary"
 github-agent-auth self-test
 ```
 
-Do not announce the release if installation, signature, Gatekeeper, or self-test
-verification fails.
+Then use a disposable private repository and test GitHub App:
+
+```sh
+cd /path/to/disposable-repository
+github-agent-auth setup
+github-agent-auth doctor
+git fetch
+git push --dry-run origin HEAD:refs/heads/agent/release-verification
+gh pr list
+sudo stat -f '%Su %Sp %N' \
+  "/Library/Application Support/AgentAuth for GitHub/config.json" \
+  "/Library/Application Support/AgentAuth for GitHub/github-app-private-key.pem"
+github-agent-auth uninstall
+```
+
+Confirm that the configuration is root-owned and not group/other-writable, the private
+key is root-owned `0600`, the LaunchDaemon stops after uninstall, and the privileged
+files, wrappers, socket, Git rewrite, and key are removed. Delete the disposable GitHub
+App afterward. Do not announce the release if installation, signature, Gatekeeper,
+self-test, brokered Git/`gh`, ownership, or uninstall verification fails.

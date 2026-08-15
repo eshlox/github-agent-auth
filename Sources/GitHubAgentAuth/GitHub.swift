@@ -48,7 +48,7 @@ enum GitHubClient {
     guard configuration.github.host == gitHubHost else {
       throw AppError.denied("unsupported GitHub host")
     }
-    let pem = try Keychain.load(appID: configuration.github.appID)
+    let pem = try SecretStore.load()
     let jwt = try makeJWT(appID: configuration.github.appID, pem: pem)
     let url = apiBase.appending(path: "app/installations/\(installationID)/access_tokens")
     var request = URLRequest(url: url)
@@ -57,7 +57,7 @@ enum GitHubClient {
     request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
     request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
     request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
-    request.setValue("AgentAuth-for-GitHub/0.1.0", forHTTPHeaderField: "User-Agent")
+    request.setValue("AgentAuth-for-GitHub", forHTTPHeaderField: "User-Agent")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     let permissions = configuration.permissionProfile.flatMap(PermissionProfile.init(rawValue:))?
       .permissions
@@ -119,7 +119,7 @@ enum GitHubClient {
     request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
     request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
     request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
-    request.setValue("AgentAuth-for-GitHub/0.2.0", forHTTPHeaderField: "User-Agent")
+    request.setValue("AgentAuth-for-GitHub", forHTTPHeaderField: "User-Agent")
   }
 
   static func makeJWT(appID: UInt64, pem: Data, now: Date = Date()) throws -> String {
@@ -136,7 +136,7 @@ enum GitHubClient {
       let signature = SecKeyCreateSignature(
         key, .rsaSignatureMessagePKCS1v15SHA256, signingInput as CFData, &error) as Data?
     else {
-      throw AppError.keychain(
+      throw AppError.cryptography(
         error?.takeRetainedValue().localizedDescription ?? "RSA signing failed")
     }
     return "\(header).\(payload).\(signature.base64URL)"
@@ -147,11 +147,11 @@ enum GitHubClient {
       let begin = string.range(of: "-----BEGIN RSA PRIVATE KEY-----"),
       let end = string.range(of: "-----END RSA PRIVATE KEY-----")
     else {
-      throw AppError.keychain("expected a PKCS#1 RSA private key PEM")
+      throw AppError.cryptography("expected a PKCS#1 RSA private key PEM")
     }
     let encoded = string[begin.upperBound..<end.lowerBound].filter { !$0.isWhitespace }
     guard let der = Data(base64Encoded: String(encoded)) else {
-      throw AppError.keychain("invalid PEM encoding")
+      throw AppError.cryptography("invalid PEM encoding")
     }
     let attributes: [String: Any] = [
       kSecAttrKeyType as String: kSecAttrKeyTypeRSA,
@@ -159,7 +159,8 @@ enum GitHubClient {
     ]
     var error: Unmanaged<CFError>?
     guard let key = SecKeyCreateWithData(der as CFData, attributes as CFDictionary, &error) else {
-      throw AppError.keychain(error?.takeRetainedValue().localizedDescription ?? "invalid RSA key")
+      throw AppError.cryptography(
+        error?.takeRetainedValue().localizedDescription ?? "invalid RSA key")
     }
     return key
   }

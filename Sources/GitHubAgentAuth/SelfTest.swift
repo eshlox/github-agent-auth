@@ -5,9 +5,6 @@ enum SelfTest {
     var count = 0
     try expect(service == "net.eshlox.github-agent-auth", "stable service identifier", &count)
     try expect(
-      legacyService == "com.example.github-auth-broker", "legacy service migration identifier",
-      &count)
-    try expect(
       Repository("Org-A/FrontEnd.git") == Repository("org-a/frontend"), "repository normalization",
       &count)
     for value in [
@@ -28,8 +25,11 @@ enum SelfTest {
       }
     }
     let config = Configuration(
+      allowedUID: 501, allowedGID: 20, workerUID: 499, workerGID: 499,
       github: .init(host: gitHubHost, appID: 1),
-      installations: [.init(owner: "Org-A", installationID: 42, repositories: ["FrontEnd"])])
+      installations: [.init(owner: "Org-A", installationID: 42, repositories: ["FrontEnd"])],
+      tooling: .init(
+        ghBinary: "/usr/local/bin/gh", gitRemoteHTTPBinary: "/usr/libexec/git-remote-http"))
     try expect(
       try config.installationID(for: Repository("org-a/frontend")) == 42, "exact allowlist match",
       &count)
@@ -57,6 +57,22 @@ enum SelfTest {
       "administration", "workflows", "deployments", "environments", "secrets",
     ] {
       try expect(ciPermissions[deniedPermission] == nil, "exclude \(deniedPermission)", &count)
+    }
+    for command in [
+      ["pr", "list"], ["pr", "view", "12"],
+      ["pr", "create", "--head", "agent/test", "--title", "Title", "--body", "Body"],
+    ] {
+      _ = try CommandPolicy.validateGH(command)
+      count += 1
+    }
+    for command in [
+      ["api", "user"], ["pr", "merge", "12"], ["extension", "exec", "attacker/tool"],
+      ["alias", "set", "leak", "!env"], ["pr", "create", "--fill"],
+      ["pr", "comment", "12", "--body-file", "/etc/master.passwd"],
+    ] {
+      try expectFailure("reject gh command \(command.joined(separator: " "))", &count) {
+        _ = try CommandPolicy.validateGH(command)
+      }
     }
     let server = try LoopbackHTTPServer()
     let wrongURL = server.baseURL.appending(path: "callback").appending(queryItems: [

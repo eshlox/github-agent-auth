@@ -1,14 +1,22 @@
+import Darwin
 import Foundation
 
 let service = "net.eshlox.github-agent-auth"
-let legacyService = "com.example.github-auth-broker"
+let serviceAccount = "_github-agent-auth"
 let gitHubHost = "github.com"
 let apiBase = URL(string: "https://api.github.com")!
+
+func brokerWorkerIdentity() throws -> (uid: uid_t, gid: gid_t) {
+  guard let account = getpwnam(serviceAccount), account.pointee.pw_uid != 0 else {
+    throw AppError.config("isolated broker service account is unavailable")
+  }
+  return (account.pointee.pw_uid, account.pointee.pw_gid)
+}
 
 enum AppError: LocalizedError {
   case config(String)
   case denied(String)
-  case keychain(String)
+  case cryptography(String)
   case github(String)
   case broker(String)
   case system(String, Int32)
@@ -17,7 +25,7 @@ enum AppError: LocalizedError {
     switch self {
     case .config(let message): "invalid configuration: \(message)"
     case .denied(let message): "request denied: \(message)"
-    case .keychain(let message): "macOS Keychain error: \(message)"
+    case .cryptography(let message): "cryptography error: \(message)"
     case .github(let message): "GitHub API error: \(message)"
     case .broker(let message): "broker error: \(message)"
     case .system(let operation, let code): "\(operation) failed: \(String(cString: strerror(code)))"
@@ -26,22 +34,28 @@ enum AppError: LocalizedError {
 }
 
 enum Paths {
-  static var appDirectory: URL {
-    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      .appendingPathComponent("github-auth-broker", isDirectory: true)
-  }
-  static var config: URL { appDirectory.appendingPathComponent("config.json") }
-  static var socket: URL { appDirectory.appendingPathComponent("broker.sock") }
-  static var wrapper: URL {
+  static let systemDirectory = URL(
+    fileURLWithPath: "/Library/Application Support/AgentAuth for GitHub", isDirectory: true)
+  static let config = systemDirectory.appendingPathComponent("config.json")
+  static let privateKey = systemDirectory.appendingPathComponent("github-app-private-key.pem")
+  static let auditLog = URL(fileURLWithPath: "/var/log/github-agent-auth.log")
+  static let daemonLog = URL(fileURLWithPath: "/var/log/github-agent-auth-daemon.log")
+  static let socketDirectory = URL(fileURLWithPath: "/var/run/github-agent-auth", isDirectory: true)
+  static let socket = socketDirectory.appendingPathComponent("broker.sock")
+  static let privilegedBinary = URL(
+    fileURLWithPath: "/Library/PrivilegedHelperTools/github-agent-auth")
+  static let privilegedGH = URL(fileURLWithPath: "/Library/PrivilegedHelperTools/agentauth-gh")
+  static let launchDaemon = URL(
+    fileURLWithPath: "/Library/LaunchDaemons/\(service).plist")
+  static let isolatedGHDirectory = systemDirectory.appendingPathComponent("gh", isDirectory: true)
+  static let privateTemporaryDirectory = systemDirectory.appendingPathComponent(
+    "tmp", isDirectory: true)
+  static var ghWrapper: URL {
     FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/gh")
   }
-  static var launchAgent: URL {
+  static var gitRemoteWrapper: URL {
     FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent("Library/LaunchAgents/\(service).plist")
-  }
-  static var legacyLaunchAgent: URL {
-    FileManager.default.homeDirectoryForCurrentUser
-      .appendingPathComponent("Library/LaunchAgents/\(legacyService).plist")
+      .appendingPathComponent(".local/bin/git-remote-agentauth")
   }
 }
 
