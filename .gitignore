@@ -1,0 +1,7 @@
+.build/
+.build-release/
+.swiftpm/
+dist/
+*.pem
+*.key
+.DS_Store
