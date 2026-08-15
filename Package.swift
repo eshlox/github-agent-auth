@@ -7,5 +7,8 @@ let package = Package(
   products: [
     .executable(name: "github-agent-auth", targets: ["GitHubAgentAuth"])
   ],
-  targets: [.executableTarget(name: "GitHubAgentAuth")]
+  targets: [
+    .executableTarget(name: "GitHubAgentAuth"),
+    .testTarget(name: "GitHubAgentAuthTests", dependencies: ["GitHubAgentAuth"]),
+  ]
 )

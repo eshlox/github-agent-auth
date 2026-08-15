@@ -4,6 +4,7 @@ set -eu
 repository=eshlox/github-agent-auth
 tap_repository=eshlox/homebrew-tap
 notary_profile=agentauth-notary
+release_gh=${RELEASE_GH:-/opt/homebrew/bin/gh}
 script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repository_directory=$(dirname "$script_directory")
 output_directory="$repository_directory/dist"
@@ -18,12 +19,22 @@ version=$1
 printf '%s\n' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || usage
 release_version=${version#v}
 
-for command in git gh security codesign xcrun spctl ditto shasum; do
+for command in git security codesign xcrun spctl ditto shasum; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Required command is unavailable: $command" >&2
     exit 1
   }
 done
+test -x "$release_gh" || {
+  echo "Trusted GitHub CLI is unavailable: $release_gh" >&2
+  echo "Set RELEASE_GH to an absolute trusted gh path" >&2
+  exit 1
+}
+case "$release_gh" in
+  /*) ;;
+  *) echo "RELEASE_GH must be an absolute path" >&2; exit 1 ;;
+esac
+export RELEASE_GH=$release_gh
 
 test "$(uname -s)" = Darwin || {
   echo "Releases require macOS" >&2
@@ -44,7 +55,7 @@ test -z "$(git status --porcelain)" || {
   exit 1
 }
 
-gh auth status -h github.com >/dev/null
+"$release_gh" auth status -h github.com >/dev/null
 git fetch origin main --tags
 test "$(git branch --show-current)" = main || {
   echo "Release from the main branch" >&2
@@ -74,11 +85,11 @@ git rev-parse -q --verify "refs/tags/$version" >/dev/null 2>&1 && {
   echo "Tag already exists: $version" >&2
   exit 1
 }
-gh release view "$version" --repo "$repository" >/dev/null 2>&1 && {
+"$release_gh" release view "$version" --repo "$repository" >/dev/null 2>&1 && {
   echo "GitHub release already exists: $version" >&2
   exit 1
 }
-gh api "repos/$tap_repository/git/ref/heads/release/github-agent-auth-$version" \
+"$release_gh" api "repos/$tap_repository/git/ref/heads/release/github-agent-auth-$version" \
   >/dev/null 2>&1 && {
   echo "Homebrew release branch already exists: release/github-agent-auth-$version" >&2
   exit 1
@@ -120,7 +131,7 @@ spctl --assess --type execute --verbose=2 \
 
 git tag -s "$version" -m "Release $version"
 git push origin "$version"
-gh release create "$version" \
+"$release_gh" release create "$version" \
   "$output_directory/github-agent-auth-macos-arm64.tar.gz" \
   "$output_directory/github-agent-auth-macos-arm64.tar.gz.sha256" \
   --repo "$repository" \

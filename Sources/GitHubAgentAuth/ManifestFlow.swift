@@ -107,7 +107,7 @@ enum ManifestFlow {
     let suffix = try randomHex(byteCount: 4)
     let value: [String: Any] = [
       "name": "AgentAuth for GitHub - \(host.prefix(10)) \(suffix)",
-      "url": "https://github.com/eshlox/gh-agent",
+      "url": projectURL,
       "description": "Repository-scoped GitHub credentials for local development agents",
       "redirect_url": callbackURL.absoluteString,
       "setup_url": setupURL.absoluteString,
