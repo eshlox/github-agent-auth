@@ -88,40 +88,41 @@ enum PrivilegedService {
     try kickstart()
   }
 
+  static func updateGH(from source: URL) throws {
+    guard geteuid() == 0 else { throw AppError.denied("GitHub CLI update requires root") }
+    let config = try Configuration.load()
+    try validateSudoCaller(config.allowedUID)
+    try installGH(from: source)
+  }
+
   static func uninstall() throws {
     guard geteuid() == 0 else { throw AppError.denied("service removal requires root") }
     let installedConfiguration = try? Configuration.load()
     if let config = installedConfiguration { try validateSudoCaller(config.allowedUID) }
     _ = try? runProcess("/bin/launchctl", ["bootout", "system/\(service)"])
-    for path in [Paths.launchDaemon, Paths.socket, Paths.auditLog, Paths.daemonLog]
-    where FileManager.default.fileExists(atPath: path.path) {
-      try FileManager.default.removeItem(at: path)
-    }
+    for path in privilegedArtifactPaths { try removeIfPresent(path) }
     try SecretStore.delete()
-    if FileManager.default.fileExists(atPath: Paths.config.path) {
-      try FileManager.default.removeItem(at: Paths.config)
-    }
-    if FileManager.default.fileExists(atPath: Paths.privilegedBinary.path) {
-      try FileManager.default.removeItem(at: Paths.privilegedBinary)
-    }
-    if FileManager.default.fileExists(atPath: Paths.privilegedGH.path) {
-      try FileManager.default.removeItem(at: Paths.privilegedGH)
-    }
-    for directory in [
-      Paths.isolatedGHDirectory, Paths.privateTemporaryDirectory, Paths.systemDirectory,
-      Paths.socketDirectory,
-    ]
-    where FileManager.default.fileExists(atPath: directory.path) {
-      try? FileManager.default.removeItem(at: directory)
-    }
+    try removeIfPresent(Paths.config)
+    try removeIfPresent(Paths.privilegedBinary)
+    try removeIfPresent(Paths.privilegedGH)
+    for directory in privilegedDirectoryPaths { try removeIfPresent(directory) }
     if let config = installedConfiguration,
       let worker = try? brokerWorkerIdentity(), worker.uid == config.workerUID,
       worker.gid == config.workerGID
     {
-      _ = try? runProcess("/usr/bin/dscl", [".", "-delete", "/Users/\(serviceAccount)"])
-      _ = try? runProcess("/usr/bin/dscl", [".", "-delete", "/Groups/\(serviceAccount)"])
+      try deleteDirectoryServiceRecord("/Users/\(serviceAccount)")
+      try deleteDirectoryServiceRecord("/Groups/\(serviceAccount)")
     }
   }
+
+  static let privilegedArtifactPaths = [
+    Paths.launchDaemon, Paths.socket, Paths.auditLog, Paths.daemonLog,
+  ]
+
+  static let privilegedDirectoryPaths = [
+    Paths.isolatedGHDirectory, Paths.privateTemporaryDirectory, Paths.systemDirectory,
+    Paths.socketDirectory,
+  ]
 
   static func invoke(_ arguments: [String], standardInput: Data? = nil) throws {
     let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
@@ -156,6 +157,17 @@ enum PrivilegedService {
     try installExecutable(from: source, to: Paths.privilegedGH)
   }
 
+  private static func removeIfPresent(_ path: URL) throws {
+    if FileManager.default.fileExists(atPath: path.path) {
+      try FileManager.default.removeItem(at: path)
+    }
+  }
+
+  private static func deleteDirectoryServiceRecord(_ record: String) throws {
+    let result = try runProcess("/usr/bin/dscl", [".", "-delete", record])
+    guard result.0 == 0 else { throw AppError.config("could not remove \(record)") }
+  }
+
   private static func installExecutable(from source: URL, to destination: URL) throws {
     let temporary = destination.appendingPathExtension("new")
     if FileManager.default.fileExists(atPath: temporary.path) {
@@ -166,7 +178,7 @@ enum PrivilegedService {
       try setMode(temporary.path, 0o755)
       let signature = try runProcess("/usr/bin/codesign", ["--verify", "--strict", temporary.path])
       guard signature.0 == 0 else {
-        throw AppError.denied("broker executable signature is invalid")
+        throw AppError.denied("executable signature is invalid")
       }
       guard Darwin.rename(temporary.path, destination.path) == 0 else {
         throw AppError.system("install privileged executable", errno)

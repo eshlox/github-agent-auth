@@ -24,6 +24,7 @@ import Foundation
     switch command {
     case "setup": try setup(arguments)
     case "install-service": try refreshService()
+    case "update-gh": try updateGH()
     case "repo": try repositoryCommand(arguments)
     case "permissions": try permissionsCommand(arguments)
     case "list": printConfiguration(try Configuration.load())
@@ -50,6 +51,12 @@ import Foundation
       try PrivilegedService.refresh(
         sourceBinary: URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath(),
         ghSource: URL(fileURLWithPath: arguments[1]).resolvingSymlinksInPath())
+    case "privileged-update-gh":
+      guard arguments.count == 2, arguments[0] == "--gh-source" else {
+        throw AppError.config("missing GitHub CLI source")
+      }
+      try PrivilegedService.updateGH(
+        from: URL(fileURLWithPath: arguments[1]).resolvingSymlinksInPath())
     case "privileged-uninstall":
       try PrivilegedService.uninstall()
     case "help", "--help", "-h": printUsage()
@@ -125,7 +132,14 @@ import Foundation
     let gh = try requiredTool("gh", excluding: Paths.ghWrapper)
     try PrivilegedService.invoke(["privileged-refresh", "--gh-source", gh.path])
     try installWrappers()
-    print("Privileged service refreshed.")
+    print("Privileged service and protected GitHub CLI refreshed.")
+  }
+
+  private static func updateGH() throws {
+    let gh = try requiredTool("gh", excluding: Paths.ghWrapper)
+    print("Updating protected GitHub CLI from \(gh.path)")
+    try PrivilegedService.invoke(["privileged-update-gh", "--gh-source", gh.path])
+    print("Protected GitHub CLI updated.")
   }
 
   private static func permissionsCommand(_ arguments: [String]) throws {
@@ -218,6 +232,8 @@ import Foundation
     check("configuration is root-owned and valid", true, &failed)
     check("GitHub host fixed to github.com", config.github.host == gitHubHost, &failed)
     check("broker responds for current UID", (try? BrokerClient.ping()) != nil, &failed)
+    check("privileged broker is root-owned", protectedExecutable(Paths.privilegedBinary), &failed)
+    check("protected GitHub CLI is root-owned", protectedExecutable(Paths.privilegedGH), &failed)
     check("gh wrapper installed", symlink(Paths.ghWrapper, targets: currentExecutable()), &failed)
     check(
       "Git remote helper installed", symlink(Paths.gitRemoteWrapper, targets: currentExecutable()),
@@ -243,7 +259,19 @@ import Foundation
     let executable = currentExecutable()
     for wrapper in [Paths.ghWrapper, Paths.gitRemoteWrapper]
     where symlink(wrapper, targets: executable) { try FileManager.default.removeItem(at: wrapper) }
-    print("Uninstalled.")
+    try removeShellPathEntries()
+    print("AgentAuth installation removed. Remove the GitHub App separately in GitHub settings.")
+  }
+
+  private static func removeShellPathEntries() throws {
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    for name in [".zprofile", ".bash_profile"] {
+      let profile = home.appendingPathComponent(name)
+      guard FileManager.default.fileExists(atPath: profile.path) else { continue }
+      let contents = try String(contentsOf: profile, encoding: .utf8)
+      let updated = removingManagedPathBlock(from: contents)
+      if updated != contents { try updated.write(to: profile, atomically: true, encoding: .utf8) }
+    }
   }
 
   private static func gitRemoteHTTP() throws -> URL {
@@ -273,6 +301,13 @@ import Foundation
   private static func symlink(_ path: URL, targets target: URL) -> Bool {
     (try? FileManager.default.destinationOfSymbolicLink(atPath: path.path)) == target.path
   }
+  private static func protectedExecutable(_ path: URL) -> Bool {
+    guard let attributes = try? FileManager.default.attributesOfItem(atPath: path.path),
+      (attributes[.ownerAccountID] as? NSNumber)?.uint32Value == 0,
+      let permissions = (attributes[.posixPermissions] as? NSNumber)?.uint16Value
+    else { return false }
+    return permissions & 0o022 == 0 && FileManager.default.isExecutableFile(atPath: path.path)
+  }
   private static func printConfiguration(_ value: Configuration) {
     for item in value.installations {
       print("\(item.owner) (\(item.installationID))")
@@ -295,6 +330,7 @@ import Foundation
       Usage:
         github-agent-auth setup [--permissions core|ci-read] [--organization OWNER]
         github-agent-auth install-service
+        github-agent-auth update-gh
         github-agent-auth repo add|remove [--repository OWNER/REPO]
         github-agent-auth permissions [set core|ci-read]
         github-agent-auth list|status|doctor|self-test
@@ -303,4 +339,9 @@ import Foundation
       Run setup inside the first repository you want to authorize.
       """)
   }
+}
+
+func removingManagedPathBlock(from contents: String) -> String {
+  contents.replacingOccurrences(
+    of: "# Added by github-agent-auth\nexport PATH=\"$HOME/.local/bin:$PATH\"\n", with: "")
 }

@@ -24,8 +24,9 @@ Setup opens GitHub for two confirmations:
 
 The final installation step asks for macOS administrator approval. It installs a
 root-owned LaunchDaemon, hidden non-login `_github-agent-auth` worker account,
-configuration, GitHub App private key, and private copy of the GitHub CLI. No GitHub
-credential is stored in the user's account or returned through the broker socket.
+configuration, GitHub App private key, and root-owned protected copy of the GitHub CLI.
+No GitHub credential is stored in the user's account or returned through the broker
+socket.
 
 After setup, existing commands remain unchanged:
 
@@ -110,6 +111,7 @@ configuration is root-owned.
 ```sh
 github-agent-auth setup
 github-agent-auth install-service
+github-agent-auth update-gh
 github-agent-auth repo add|remove
 github-agent-auth permissions
 github-agent-auth permissions set core|ci-read
@@ -120,8 +122,22 @@ github-agent-auth self-test
 github-agent-auth uninstall
 ```
 
-Run `install-service` after upgrading the Homebrew package. It replaces the privileged
-binary and private GitHub CLI copy, then restarts the daemon.
+Run `install-service` after upgrading `github-agent-auth`. It replaces the privileged
+broker and protected GitHub CLI, then restarts the daemon. After upgrading the separate
+user-installed GitHub CLI, refresh only the protected runtime:
+
+```sh
+brew upgrade gh
+github-agent-auth update-gh
+```
+
+`update-gh` finds the real `gh` behind the AgentAuth wrapper, copies it atomically into
+`/Library/PrivilegedHelperTools/agentauth-gh`, verifies that its macOS code signature is
+structurally valid, and requires administrator approval. The broker never executes the
+user-owned source with a token. Because Homebrew binaries are user-owned and commonly
+ad-hoc signed, this is an explicit administrator trust decision rather than proof of the
+binary's publisher. Install `gh` only from a source you trust and update it before running
+`update-gh`.
 
 ## Security boundary
 
@@ -147,6 +163,9 @@ requests, and never put the App on a bypass list. Root compromise, kernel compro
 and vulnerabilities in the small root broker are outside the boundary. Git and GitHub
 CLI process untrusted network data without root or agent-user privileges.
 
+See [SECURITY.md](SECURITY.md) for the complete threat model, credential flows, security
+decisions, update trust model, and residual risks.
+
 ## Build from source
 
 ```sh
@@ -168,11 +187,13 @@ github-agent-auth uninstall
 brew uninstall github-agent-auth
 ```
 
-Uninstall removes the LaunchDaemon, privileged binaries, socket, root-owned
-configuration, App private key, audit log, wrappers, and Git URL rewrite. It does not
-also removes the hidden `_github-agent-auth` service account. It does not delete the
-GitHub App or its installation; remove those in GitHub settings when they
-are no longer needed.
+Uninstall removes the LaunchDaemon, privileged broker and protected GitHub CLI, socket,
+root-owned configuration, App private key, logs, isolated worker directories, hidden
+`_github-agent-auth` account and group, wrappers, Git URL rewrite, and the shell PATH block
+created by setup. `brew uninstall github-agent-auth` then removes the package-manager
+receipt and user-facing executable. The command deliberately does not delete the GitHub
+App or its installation because those are external, potentially shared resources; remove
+them in GitHub settings when they are no longer needed.
 
 ## Release
 

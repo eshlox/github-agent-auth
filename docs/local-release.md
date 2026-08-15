@@ -165,6 +165,7 @@ Then use a disposable private repository and test GitHub App:
 cd /path/to/disposable-repository
 github-agent-auth setup
 github-agent-auth doctor
+github-agent-auth update-gh
 git fetch
 git push --dry-run origin HEAD:refs/heads/agent/release-verification
 gh pr list
@@ -174,7 +175,8 @@ sudo stat -f '%Su %Sp %N' \
 github-agent-auth uninstall
 ```
 
-Confirm that the configuration is root-owned and not group/other-writable, the private
+Confirm that the protected GitHub CLI refresh requires administrator approval, the
+configuration is root-owned and not group/other-writable, the private
 key is root-owned `0600`, the LaunchDaemon stops after uninstall, and the privileged
 files, wrappers, socket, Git rewrite, and key are removed. Delete the disposable GitHub
 App afterward. Do not announce the release if installation, signature, Gatekeeper,

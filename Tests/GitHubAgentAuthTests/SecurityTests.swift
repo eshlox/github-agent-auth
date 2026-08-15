@@ -90,6 +90,27 @@ final class SecurityTests: XCTestCase {
     XCTAssertThrowsError(try arbitrary.validate(Data("secret input".utf8)))
   }
 
+  func testUninstallRemovesEveryPrivilegedArtifact() {
+    XCTAssertEqual(
+      Set(PrivilegedService.privilegedArtifactPaths),
+      Set([Paths.launchDaemon, Paths.socket, Paths.auditLog, Paths.daemonLog]))
+    XCTAssertEqual(
+      Set(PrivilegedService.privilegedDirectoryPaths),
+      Set([
+        Paths.isolatedGHDirectory, Paths.privateTemporaryDirectory, Paths.systemDirectory,
+        Paths.socketDirectory,
+      ]))
+  }
+
+  func testUninstallRemovesOnlyManagedShellPathBlock() {
+    let profile =
+      "export EDITOR=vim\n# Added by github-agent-auth\n"
+      + "export PATH=\"$HOME/.local/bin:$PATH\"\nexport LANG=en_US.UTF-8\n"
+    XCTAssertEqual(
+      removingManagedPathBlock(from: profile),
+      "export EDITOR=vim\nexport LANG=en_US.UTF-8\n")
+  }
+
   private func configuration() -> Configuration {
     Configuration(
       allowedUID: 501, allowedGID: 20, workerUID: 499, workerGID: 499,
