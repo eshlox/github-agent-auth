@@ -1,199 +1,175 @@
-# Security policy and design
+# Security
 
-Do not open a public issue for a suspected vulnerability or compromised release. Use
-GitHub's private vulnerability reporting for this repository. Include the affected
-version, macOS version, reproduction steps, and relevant signature, checksum, or
-Gatekeeper output. Never include private keys, installation tokens, authorization
-headers, or other secrets.
+## Report a vulnerability
 
-Only the latest published release receives security fixes. A release is supported only
-after its Developer ID signed and notarized archive, checksum, and reviewed Homebrew
-formula are published. Source snapshots and artifacts from untrusted forks are not
-release builds.
+Use GitHub private vulnerability reporting. Do not open a public issue.
 
-## Security objective
+Include the AgentAuth version, macOS version, reproduction steps, and relevant signature,
+checksum, or Gatekeeper output. Never include keys, tokens, or authorization headers.
 
-AgentAuth lets an untrusted process running as one configured macOS user perform a small
-set of GitHub operations without giving that process a reusable GitHub credential. It
-protects the GitHub App private key and short-lived installation tokens and limits their
-use to explicitly configured repositories, permissions, Git transport, and GitHub CLI
-commands.
+Only the latest published release receives security fixes. Supported releases have a
+Developer ID signed and notarized archive, checksum, and reviewed Homebrew formula.
 
-AgentAuth is a credential and operation boundary, not a general coding-agent sandbox. A
-process running as the configured user can still read and modify that user's files,
-rewrite source and Git history, invoke any operation the broker deliberately allows, and
-misrepresent local command output.
+## Goal
 
-## Protected assets and trust assumptions
+AgentAuth lets an untrusted process running as one macOS user perform a small set of GitHub
+operations without receiving a reusable GitHub credential.
 
-Protected assets are the GitHub App private key, installation tokens, root-owned
-repository and permission policy, privileged executables, and audit records. The design
-assumes that macOS, the kernel, root, launchd, sudo, Directory Services, Apple's Xcode
-Command Line Tools, the installed protected GitHub CLI, and GitHub are not compromised.
-It also assumes the administrator reviews the source of a GitHub CLI refresh before
-approving it.
+It protects:
 
-Root or kernel compromise is outside the model. So are malicious GitHub responses,
-vulnerabilities in GitHub, Xcode's HTTPS transport, or the protected GitHub CLI, and
-physical attacks against an unlocked Mac. A compromised configured user is inside the
-model only with respect to broker credentials and broker-enforced remote operations, not
-the integrity or confidentiality of that user's local account.
+- The GitHub App private key and installation tokens
+- The repository and permission policy
+- Privileged executables and configuration
+- Broker audit records from the configured user
 
-## Process and credential flow
+It does not protect the configured user's local files, source tree, Git history, terminal
+output, or other accounts. Software running as that user can request every operation the
+policy allows.
 
-The root-owned LaunchDaemon authenticates each Unix-domain socket client using
-`getpeereid`. Only the non-root UID recorded at setup is accepted. A request must identify
-one configured `owner/repository` and one supported operation before the broker mints or
-reuses a short-lived GitHub App installation token.
+## Trust assumptions
 
-The root process owns the App key, validates policy, mints tokens, and records decisions.
-It launches credential-bearing tools as the hidden, password-disabled, non-login
-`_github-agent-auth` worker account. They run neither as root nor as the configured user.
-The user-facing socket streams only Git protocol data or output from an allowlisted
-command; it never returns a key, token, authorization header, or child environment.
+AgentAuth trusts macOS, the kernel, root, launchd, sudo, Directory Services, Xcode Command
+Line Tools, the installed protected GitHub CLI, and GitHub.
 
-For Git HTTPS remotes, a global `insteadOf` rule selects `git-remote-agentauth`. The
-broker accepts only Git's `capabilities` and `stateless-connect` protocol for
-`git-upload-pack` or `git-receive-pack`. It launches the absolute, root-owned Xcode
-`git-remote-http` path with credential helpers, redirects, interactive prompts, and the
-working repository disabled. The user's Git executable remains untrusted and never
-receives the token.
+The model does not cover root or kernel compromise, an unlocked Mac under physical
+attack, malicious GitHub responses, or vulnerabilities in GitHub, Xcode Git transport,
+the protected GitHub CLI, or AgentAuth itself.
 
-For GitHub CLI operations, the user-facing `gh` shim validates a strict command allowlist
-and sends structured arguments plus the current repository to the broker. The broker
-validates them again and adds the fixed repository itself. It runs the root-owned
-protected GitHub CLI with an otherwise empty environment, isolated configuration and
-temporary directories, disabled prompts, and closed standard input.
+## Credential flow
+
+1. A user shim sends a structured request through a Unix socket.
+2. The root daemon verifies the peer UID with `getpeereid`.
+3. The daemon validates the repository, operation, and local permission cap.
+4. The daemon mints or reuses a short-lived token for one repository.
+5. A hidden `_github-agent-auth` worker runs the approved Git or `gh` operation.
+6. The socket returns command or Git protocol output, never the credential.
+
+The root daemon handles the fixed GitHub App token exchange. General Git and GitHub CLI
+network parsing runs under the worker account.
 
 ## Security decisions
 
 ### Root-owned LaunchDaemon
 
-The daemon needs access to the App key and policy even when no user is logged in. Root
-ownership prevents the configured user from replacing the daemon, configuration, key, or
-LaunchDaemon definition. Root necessarily handles the small, fixed GitHub App token API
-exchange; general Git transport and GitHub CLI network parsing are delegated to the
-isolated worker.
+Root ownership prevents the configured user from replacing the daemon, App key, policy,
+or LaunchDaemon definition. The daemon delegates credential-bearing tools to a non-root
+worker.
 
 ### Dedicated worker account
 
-`_github-agent-auth` is a real local Directory Services account with a dynamically
-allocated system UID and GID. It is hidden, has a disabled password, uses
-`/usr/bin/false` as its shell, and cannot log in. A dedicated identity avoids giving
-tokens to root, the configured user, or a shared account such as `nobody`. Its home,
-configuration, and temporary directories are isolated with mode `0700`.
+`_github-agent-auth` is a hidden local account with a system UID and GID, disabled
+password, `/usr/bin/false` shell, and no login access. It keeps tokens away from root, the
+configured user, and shared accounts such as `nobody`. Its private directories use mode
+`0700`.
 
-### Root-owned App key and configuration
+### Root-owned key and policy
 
-The private key is stored as a root-owned `0600` file. Configuration is root-owned and
-not writable by group or others. Mutations require both root and a `SUDO_UID` matching
-the configured client UID, preventing another administrator session from casually
-changing this user's policy through the public command surface.
+The App key is root-owned with mode `0600`. Configuration is root-owned and not writable
+by group or others. Policy updates require root and a `SUDO_UID` equal to the configured
+client UID.
 
-### Kernel-authenticated local socket
+### Kernel-authenticated socket
 
-The broker trusts the peer UID reported by the kernel rather than a username, path,
-environment variable, or client-provided identity. The socket is not a token API: a
-successful request performs one bounded operation and streams only its result.
+The broker trusts the peer UID reported by macOS, not a username, path, environment
+variable, or client claim. The socket performs operations and never acts as a token API.
 
-### GitHub App installation tokens
+### Scoped installation tokens
 
-Tokens are short-lived and minted for exactly one configured installation and repository.
-Every request includes the local permission cap. The default `core` cap contains only
-metadata read, contents read/write, and pull-request read/write. `ci-read` adds Actions,
-Checks, and Commit statuses read-only. Expanding the GitHub App later does not silently
-expand locally requested token permissions.
+Each token request names one configured repository and includes the local permission cap.
+The default `core` cap requests metadata read, contents read/write, and pull-request
+read/write. `ci-read` also requests Actions, Checks, and Commit statuses read-only.
 
-### Fixed GitHub origins and repositories
+Changing GitHub App permissions does not change the local cap. Protect default branches
+with reviewed pull requests and rulesets that the App cannot bypass.
 
-Only exactly `github.com` and the compiled-in `https://api.github.com` origin are
-accepted. Credentials in URLs, alternate schemes, ports, redirects, repository override
-flags, and unlisted repositories are rejected. This prevents a caller from redirecting
-credentials to another host or widening repository scope.
+### Fixed GitHub destination
 
-### Restricted Git transport
+Only exactly `github.com` and the compiled-in `https://api.github.com` origin are allowed.
+The broker rejects alternate hosts, schemes, ports, credentials in URLs, redirects,
+repository overrides, and unlisted repositories.
 
-The broker exposes only stateless fetch and push transport, not arbitrary `git`
-subcommands. The privileged helper uses `GIT_DIR=/dev/null`, so it cannot inspect or
-modify the user's worktree or object database. Branch protection and review requirements
-remain GitHub responsibilities and should be enforced with rulesets that the App cannot
-bypass.
+### Restricted Git
+
+Git supports only `capabilities` and `stateless-connect` for `git-upload-pack` and
+`git-receive-pack`. The broker runs the absolute, root-owned Xcode `git-remote-http` with
+credential helpers, redirects, prompts, and the working repository disabled. The user's
+Git process remains untrusted and never receives a token.
 
 ### Restricted GitHub CLI
 
-Only the documented `repo view` and pull-request commands are accepted. Arbitrary API
-calls, aliases, extensions, merge commands, repository overrides, editor and web flows,
-templates, debug output, and arbitrary file or standard-input consumption are denied.
-`pr create` requires explicit head, title, and body values. This reduces token escape and
-prevents the worker from reading attacker-selected local files. Merging is intentionally
-left to a separately authorized, reviewed workflow.
+The public `gh` shim and broker both enforce the same built-in allowlist. The broker fixes
+the repository and runs `gh` with closed input, isolated directories, disabled prompts,
+and a clean environment.
+
+The broker rejects `gh api`, aliases, extensions, merge, repository overrides, editors,
+web flows, templates, debug output, and arbitrary file input. `pr create` requires an
+explicit head, title, and body.
 
 ### Protected GitHub CLI copy
 
-Homebrew is designed for a single user and its prefix is normally writable by that user.
-Executing `/opt/homebrew/bin/gh` with a token would therefore let a compromised user
-replace the executable and receive the token. Setup copies the selected CLI atomically to
-`/Library/PrivilegedHelperTools/agentauth-gh`, owned by root and not writable by the
-configured user. The original installation remains untouched and is never executed with
-a broker token.
+Homebrew files are normally writable by the installing user. Giving a Homebrew `gh`
+process a token would let compromised user software replace it and steal that token.
 
-After updating the user-installed CLI, `github-agent-auth update-gh` explicitly refreshes
-the protected copy under administrator approval. The destination is written to a
-temporary file, set to mode `0755`, checked with `codesign --verify --strict`, and renamed
-atomically. Existing processes continue using their already opened version; new requests
-use the replacement.
+Setup atomically copies `gh` to root-owned
+`/Library/PrivilegedHelperTools/agentauth-gh`. The broker never executes the user-owned
+source with a token.
 
-This check proves internal code-signature consistency, not publisher identity. Homebrew
-`gh` binaries may be user-owned and ad-hoc signed. Consequently, approving `update-gh`
-means trusting the selected source binary and its installation channel. A compromised
-configured user with an already cached or passwordless sudo authorization may be able to
-approve a malicious replacement; do not grant unattended sudo access to this command.
-Independent Homebrew bottle-provenance verification is not currently implemented.
+After updating the trusted user installation, run:
 
-### Clean subprocess environments
+```sh
+github-agent-auth update-gh
+```
 
-Credential-bearing subprocesses receive an explicit environment rather than the daemon
-or user's environment. Interactive prompts, pagers, editors, aliases, extensions,
-credential helpers, redirects, and user configuration are disabled or isolated. This
-reduces environment-variable injection and accidental secret disclosure.
+The command prints the source path and requires administrator approval. It copies to a
+temporary root-owned file, sets mode `0755`, runs `codesign --verify --strict`, and
+atomically replaces the protected copy.
 
-### Audit logging
+This verifies code-signature consistency, not publisher identity. Homebrew `gh` may be
+ad-hoc signed. Approval therefore means trusting the displayed source and its installation
+channel. Independent Homebrew bottle provenance verification is not implemented. Do not
+allow passwordless sudo for AgentAuth commands.
 
-Every allow or deny policy decision for a valid broker request records timestamp, peer
-UID, repository, normalized operation, and decision in
-`/var/log/github-agent-auth.log`. Malformed requests rejected before policy evaluation
-are not recorded there. Arguments and credentials are omitted. The file is root-owned
-with mode `0600` and appended under a process lock. It is not tamper-proof against root
-and is removed during uninstall.
+### Clean subprocess state
 
-### Signed and notarized releases
+Credential-bearing tools receive an explicit environment. User configuration, credential
+helpers, aliases, extensions, prompts, pagers, editors, and temporary directories are
+disabled or isolated where applicable.
 
-Published binaries are built on a dedicated Apple Silicon Mac, signed with Developer ID,
-notarized by Apple, Gatekeeper-checked, checksummed, and released through a reviewed
-Homebrew formula. Source builds are supported for development but do not provide the same
-publisher verification.
+### Minimal audit data
 
-### Explicit complete local uninstall
+Valid allow and deny policy decisions record timestamp, peer UID, repository, normalized
+operation, and decision in `/var/log/github-agent-auth.log`. Arguments and credentials are
+not logged. Malformed requests rejected before policy evaluation are not logged.
 
-`github-agent-auth uninstall` removes the LaunchDaemon, socket, privileged executables,
-configuration, private key, logs, worker directories, service account and group, Git URL
-rewrite, wrappers, and the exact shell PATH block created by setup. Cleanup errors are
-reported instead of silently declaring success. `brew uninstall github-agent-auth`
-removes the package-manager receipt and remaining user-facing executable.
+The log is root-owned with mode `0600`. It is not tamper-proof against root and is removed
+by uninstall.
 
-The GitHub App and installation are not deleted automatically. They are external
-resources that may be shared or require separate GitHub authorization. Remove them in
-GitHub settings to revoke the installation completely.
+### Signed releases
 
-## Residual risks and operational controls
+Published releases are built on a dedicated Apple Silicon Mac, Developer ID signed,
+notarized, Gatekeeper checked, checksummed, and distributed through a reviewed Homebrew
+formula. Source builds do not provide the same publisher verification.
 
-- Protect default branches with reviewed pull requests and required checks; never give
-  the App ruleset bypass permission.
+### Explicit uninstall
+
+```sh
+github-agent-auth uninstall
+brew uninstall github-agent-auth
+```
+
+The first command removes local broker state, privileged files, logs, worker directories,
+the service account and group, Git configuration, shims, and setup's shell PATH block.
+Cleanup errors fail the command. The second command removes the Homebrew package.
+
+The GitHub App is external and may be shared, so uninstall does not delete it. Remove it
+in GitHub settings to revoke it fully.
+
+## Operator checklist
+
 - Keep macOS, Xcode Command Line Tools, GitHub CLI, and AgentAuth updated.
-- Install GitHub CLI only through a trusted channel and review the path printed by
-  `update-gh` before approving sudo.
-- Do not configure passwordless sudo for AgentAuth privileged commands.
-- Treat unexpected audit entries, worker-account changes, signature failures, or a
-  changed privileged binary as a potential compromise.
-- Run `github-agent-auth doctor` after installation or repair and perform release
-  verification with a disposable private repository.
+- Install GitHub CLI from a trusted channel.
+- Review the path printed by `update-gh` before approving sudo.
+- Do not configure passwordless sudo for AgentAuth.
+- Keep the App off every ruleset bypass list.
+- Investigate unexpected audit entries, account changes, or signature failures.
+- Run `github-agent-auth doctor` after setup, updates, or repairs.
