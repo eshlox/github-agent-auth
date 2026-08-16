@@ -4,6 +4,7 @@ import Foundation
 enum BrokerOperation: String, Codable, Sendable {
   case gitRemote = "git_remote"
   case ghCommand = "gh_command"
+  case githubContext = "github_context"
   case ping
 }
 struct BrokerRequest: Codable, Sendable {
@@ -18,6 +19,50 @@ enum StreamChannel: UInt8 {
 }
 
 enum BrokerInputPolicy { case gitStateless, closed }
+
+enum ContextKind: String, CaseIterable {
+  case codeQuality = "code-quality"
+  case codeScanning = "code-scanning"
+  case dependabot
+  case deployments
+  case discussions
+  case mergeQueue = "merge-queue"
+
+  func ghArguments(repository: Repository) -> [String] {
+    let path: String
+    switch self {
+    case .codeQuality: path = "repos/\(repository)/code-quality/findings?per_page=100"
+    case .codeScanning:
+      path = "repos/\(repository)/code-scanning/alerts?state=open&per_page=100"
+    case .dependabot: path = "repos/\(repository)/dependabot/alerts?state=open&per_page=100"
+    case .deployments: path = "repos/\(repository)/deployments?per_page=100"
+    case .discussions:
+      return graphqlArguments(
+        repository: repository,
+        selection:
+          "discussions(first: 50, orderBy: {field: UPDATED_AT, direction: DESC}) { nodes { number title body url updatedAt category { name } answer { body url } } }"
+      )
+    case .mergeQueue:
+      return graphqlArguments(
+        repository: repository,
+        selection:
+          "mergeQueue { entries(first: 100) { nodes { position state enqueuedAt estimatedTimeToMerge pullRequest { number title url headRefName baseRefName } } } }"
+      )
+    }
+    return [
+      "api", "--method", "GET", "-H", "X-GitHub-Api-Version: 2026-03-10", path,
+    ]
+  }
+
+  private func graphqlArguments(repository: Repository, selection: String) -> [String] {
+    let query =
+      "query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { \(selection) } }"
+    return [
+      "api", "graphql", "-H", "X-GitHub-Api-Version: 2026-03-10", "-f", "query=\(query)",
+      "-F", "owner=\(repository.owner)", "-F", "name=\(repository.name)",
+    ]
+  }
+}
 
 struct InputValidator {
   private let policy: BrokerInputPolicy
@@ -72,6 +117,7 @@ private final class RelayErrorBox: @unchecked Sendable {
 
 enum CommandPolicy {
   private static let allowedGHCommands: Set<String> = [
+    "issue close", "issue comment", "issue create", "issue list", "issue reopen", "issue view",
     "pr checks", "pr close", "pr comment", "pr create", "pr diff", "pr list", "pr ready",
     "pr reopen", "pr review", "pr status", "pr view", "repo view",
   ]
@@ -98,7 +144,28 @@ enum CommandPolicy {
         throw AppError.denied("gh pr create requires \(required)")
       }
     }
+    if arguments[0] == "issue" { try validateIssue(arguments, command: command) }
     return command.replacingOccurrences(of: " ", with: "_")
+  }
+
+  private static func validateIssue(_ arguments: [String], command: String) throws {
+    if command == "issue create" {
+      guard arguments.count == 6, arguments[2] == "--title", arguments[4] == "--body" else {
+        throw AppError.denied("gh issue create requires only --title and --body")
+      }
+      return
+    }
+    if command == "issue comment" {
+      guard arguments.count == 5, UInt64(arguments[2]) != nil, arguments[3] == "--body" else {
+        throw AppError.denied("gh issue comment requires NUMBER --body TEXT")
+      }
+      return
+    }
+    if command == "issue close" || command == "issue reopen" {
+      guard arguments.count == 3, UInt64(arguments[2]) != nil else {
+        throw AppError.denied("\(command) requires one issue number")
+      }
+    }
   }
 }
 
@@ -168,6 +235,12 @@ final class Broker: @unchecked Sendable {
     do {
       if request.operation == .ghCommand {
         operation = try CommandPolicy.validateGH(request.arguments)
+      } else if request.operation == .githubContext {
+        guard request.arguments.count == 1,
+          let context = ContextKind(rawValue: request.arguments[0]),
+          configuration.permissionProfile == PermissionProfile.developer.rawValue
+        else { throw AppError.denied("developer context request is not allowed") }
+        operation = "context_\(context.rawValue.replacingOccurrences(of: "-", with: "_"))"
       } else if request.operation == .gitRemote {
         operation = "git_transport"
       }
@@ -185,6 +258,12 @@ final class Broker: @unchecked Sendable {
         try execute(
           executable: configuration.tooling.ghBinary,
           arguments: request.arguments + ["--repo", repository.description],
+          environment: ghEnvironment(token: token), inputPolicy: .closed, descriptor: descriptor)
+      case .githubContext:
+        let context = ContextKind(rawValue: request.arguments[0])!
+        try execute(
+          executable: configuration.tooling.ghBinary,
+          arguments: context.ghArguments(repository: repository),
           environment: ghEnvironment(token: token), inputPolicy: .closed, descriptor: descriptor)
       case .ping: break
       }
@@ -333,6 +412,17 @@ enum BrokerClient {
       .init(
         version: 1, operation: .ghCommand, repository: repository.description, arguments: arguments)
     )
+    try sendFrame(.inputClosed, Data(), to: descriptor)
+    let status = try relayOutput(descriptor)
+    Darwin.close(descriptor)
+    exit(status)
+  }
+
+  static func runContext(repository: Repository, kind: ContextKind) throws -> Never {
+    let descriptor = try connect(
+      .init(
+        version: 1, operation: .githubContext, repository: repository.description,
+        arguments: [kind.rawValue]))
     try sendFrame(.inputClosed, Data(), to: descriptor)
     let status = try relayOutput(descriptor)
     Darwin.close(descriptor)

@@ -33,6 +33,12 @@ final class SecurityTests: XCTestCase {
       try CommandPolicy.validateGH([
         "pr", "create", "--head", "agent/change", "--title", "Title", "--body", "Body",
       ]), "pr_create")
+    XCTAssertEqual(
+      try CommandPolicy.validateGH(["issue", "create", "--title", "Title", "--body", "Body"]),
+      "issue_create")
+    XCTAssertEqual(
+      try CommandPolicy.validateGH(["issue", "comment", "12", "--body", "Body"]),
+      "issue_comment")
   }
 
   func testGHPolicyRejectsCredentialEscapeSurfaces() {
@@ -44,9 +50,31 @@ final class SecurityTests: XCTestCase {
       ["pr", "close", "12", "--delete-branch"],
       ["pr", "list", "-Rattacker/repository"],
       ["pr", "list", "--", "--repo", "attacker/repository"],
+      ["issue", "create", "--title", "Title", "--body-file", "/etc/master.passwd"],
+      ["issue", "create", "--title", "Title", "--body", "Body", "--label", "approved"],
+      ["issue", "comment", "12", "--body", "Body", "--edit-last"],
+      ["issue", "close", "12", "--reason", "not planned"],
     ] {
       XCTAssertThrowsError(
         try CommandPolicy.validateGH(arguments), arguments.joined(separator: " "))
+    }
+  }
+
+  func testDeveloperContextUsesOnlyFixedGitHubAPIRequests() throws {
+    let repository = try Repository("owner/repository")
+    for kind in ContextKind.allCases {
+      let arguments = kind.ghArguments(repository: repository)
+      XCTAssertEqual(arguments.first, "api")
+      XCTAssertFalse(arguments.contains("--input"))
+      XCTAssertFalse(arguments.contains("--raw-field"))
+      if arguments.dropFirst().first == "graphql" {
+        XCTAssertTrue(arguments.contains(where: { $0.hasPrefix("query=query(") }))
+        XCTAssertFalse(arguments.contains(where: { $0.contains("mutation") }))
+      } else {
+        XCTAssertEqual(Array(arguments.prefix(3)), ["api", "--method", "GET"])
+      }
+      XCTAssertTrue(arguments.joined(separator: " ").contains("owner"))
+      XCTAssertTrue(arguments.joined(separator: " ").contains("repository"))
     }
   }
 
@@ -59,6 +87,12 @@ final class SecurityTests: XCTestCase {
     XCTAssertThrowsError(try config.validate())
     config = configuration()
     config.workerUID = config.allowedUID
+    XCTAssertThrowsError(try config.validate())
+    config = configuration()
+    config.permissionProfile = nil
+    XCTAssertThrowsError(try config.validate())
+    config = configuration()
+    config.permissionProfile = "ci-read"
     XCTAssertThrowsError(try config.validate())
   }
 

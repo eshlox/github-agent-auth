@@ -39,7 +39,7 @@ enum PrivilegedService {
     switch operation {
     case "permissions":
       guard arguments.count == 1, let profile = PermissionProfile(rawValue: arguments[0]) else {
-        throw AppError.config("permissions requires core or ci-read")
+        throw AppError.config("permissions requires core or developer")
       }
       config.permissionProfile = profile.rawValue
     case "repo-add":

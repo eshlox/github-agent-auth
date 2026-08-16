@@ -76,7 +76,9 @@ variable, or client claim. The socket performs operations and never acts as a to
 
 Each token request names one configured repository and includes the local permission cap.
 The default `core` cap requests metadata read, contents read/write, and pull-request
-read/write. `ci-read` also requests Actions, Checks, and Commit statuses read-only.
+read/write, and issues read/write. `developer` also requests read-only access to Actions,
+Checks, Commit statuses, Code Quality, Code scanning alerts, Dependabot alerts,
+Deployments, Discussions, and Merge queues.
 
 Changing GitHub App permissions does not change the local cap. Protect default branches
 with reviewed pull requests and rulesets that the App cannot bypass.
@@ -102,7 +104,13 @@ and a clean environment.
 
 The broker rejects `gh api`, aliases, extensions, merge, repository overrides, editors,
 web flows, templates, debug output, and arbitrary file input. `pr create` requires an
-explicit head, title, and body.
+explicit head, title, and body. Issue writes are limited to creation, inline comments,
+close, and reopen. Issue metadata edits and bulk operations are rejected.
+
+The `context` command exposes fixed read-only API requests for the `developer` profile.
+Callers cannot choose an API path, GraphQL query, HTTP method, host, or unconfigured
+repository. Secret scanning alerts and private repository security advisories are not
+requested.
 
 ### Protected GitHub CLI copy
 

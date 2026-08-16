@@ -90,13 +90,18 @@ Supported GitHub CLI commands:
 
 ```text
 gh repo view
+gh issue list|view
+gh issue create --title "Title" --body "Description"
+gh issue comment NUMBER --body "Comment"
+gh issue close|reopen NUMBER
 gh pr list|status|view|checks|diff
 gh pr create|comment|review|close|reopen|ready
 ```
 
 `gh pr create` requires `--head`, `--title`, and `--body`. Merge, `gh api`, aliases,
 extensions, repository overrides, editors, web flows, and arbitrary file inputs are
-blocked.
+blocked. Issue creation and comments require inline text. Issue metadata edits and bulk
+operations are blocked.
 
 ## Repository and permission policy
 
@@ -104,14 +109,37 @@ The default `core` profile requests:
 
 - Metadata read
 - Contents read/write
+- Issues read/write
 - Pull requests read/write
 
-Use `ci-read` only when the agent must read Actions, Checks, or Commit statuses:
+Use `developer` when the agent must inspect CI, security findings, deployments,
+discussions, or merge queues:
 
 ```sh
-github-agent-auth setup --permissions ci-read
-github-agent-auth permissions set ci-read
+github-agent-auth setup --permissions developer
+github-agent-auth permissions set developer
 ```
+
+The App must already have the selected permissions. Choose `developer` during setup if
+you need this profile.
+
+The `developer` profile adds read-only access to Actions, Checks, Commit statuses, Code
+Quality, Code scanning alerts, Dependabot alerts, Deployments, Discussions, and Merge
+queues. It does not grant access to secrets, secret-scanning alerts, private security
+advisories, environments, administration, or workflow modification.
+
+Read developer context as JSON:
+
+```sh
+github-agent-auth context code-quality
+github-agent-auth context code-scanning
+github-agent-auth context dependabot
+github-agent-auth context deployments
+github-agent-auth context discussions
+github-agent-auth context merge-queue
+```
+
+Context commands use fixed read-only API requests. General `gh api` remains blocked.
 
 The broker requests its local permission cap for every token. Expanding the GitHub App
 does not expand broker tokens automatically.

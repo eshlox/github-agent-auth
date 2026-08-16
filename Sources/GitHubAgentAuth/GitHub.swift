@@ -25,7 +25,7 @@ enum GitHubClient {
   private struct Claims: Encodable { let iat: Int, exp: Int, iss: String }
   private struct TokenRequest: Encodable {
     let repositories: [String]
-    let permissions: [String: String]?
+    let permissions: [String: String]
   }
   private struct TokenResponse: Decodable {
     let token: String
@@ -59,8 +59,9 @@ enum GitHubClient {
     request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
     request.setValue("AgentAuth-for-GitHub", forHTTPHeaderField: "User-Agent")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    let permissions = configuration.permissionProfile.flatMap(PermissionProfile.init(rawValue:))?
-      .permissions
+    guard let name = configuration.permissionProfile,
+      let permissions = PermissionProfile(rawValue: name)?.permissions
+    else { throw AppError.config("permission profile must be core or developer") }
     request.httpBody = try JSONEncoder().encode(
       TokenRequest(
         repositories: [repository.name], permissions: permissions
