@@ -27,6 +27,7 @@ import Foundation
     case "update-gh": try updateGH()
     case "repo": try repositoryCommand(arguments)
     case "permissions": try permissionsCommand(arguments)
+    case "context": try contextCommand(arguments)
     case "list": printConfiguration(try Configuration.load())
     case "status": try status()
     case "doctor": try doctor()
@@ -145,17 +146,32 @@ import Foundation
   private static func permissionsCommand(_ arguments: [String]) throws {
     if arguments.first == "set" {
       guard arguments.count == 2, PermissionProfile(rawValue: arguments[1]) != nil else {
-        throw AppError.config("usage: permissions set core|ci-read")
+        throw AppError.config("usage: permissions set core|developer")
       }
       try PrivilegedService.invoke(["privileged-update", "permissions", arguments[1]])
       print("Local token permission cap set to \(arguments[1]).")
     } else if !arguments.isEmpty {
-      throw AppError.config("usage: permissions [set core|ci-read]")
+      throw AppError.config("usage: permissions [set core|developer]")
     }
     let config = try Configuration.load()
     let profile = config.permissionProfile.flatMap(PermissionProfile.init(rawValue:))
     print("Local profile: \(profile?.rawValue ?? "unknown")")
     if let profile { print(profile.summary) }
+  }
+
+  private static func contextCommand(_ arguments: [String]) throws {
+    guard let name = arguments.first, let kind = ContextKind(rawValue: name) else {
+      throw AppError.config(
+        "usage: context code-quality|code-scanning|dependabot|deployments|discussions|merge-queue")
+    }
+    let repository =
+      try option("--repository", arguments).map(Repository.init)
+      ?? GitIntegration.currentRepository()
+    let expectedCount = option("--repository", arguments) == nil ? 1 : 3
+    guard arguments.count == expectedCount else {
+      throw AppError.config("context accepts only an optional --repository OWNER/REPO")
+    }
+    try BrokerClient.runContext(repository: repository, kind: kind)
   }
 
   private static func configureGit() throws {
@@ -328,11 +344,12 @@ import Foundation
     print(
       """
       Usage:
-        github-agent-auth setup [--permissions core|ci-read] [--organization OWNER]
+        github-agent-auth setup [--permissions core|developer] [--organization OWNER]
         github-agent-auth install-service
         github-agent-auth update-gh
         github-agent-auth repo add|remove [--repository OWNER/REPO]
-        github-agent-auth permissions [set core|ci-read]
+        github-agent-auth permissions [set core|developer]
+        github-agent-auth context TYPE [--repository OWNER/REPO]
         github-agent-auth list|status|doctor|self-test
         github-agent-auth uninstall
 

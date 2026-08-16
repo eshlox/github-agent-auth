@@ -44,25 +44,36 @@ enum SelfTest {
       projectURL == "https://github.com/eshlox/github-agent-auth", "fixed project URL", &count)
     try expect(
       PermissionProfile.core.permissions == [
-        "contents": "write", "pull_requests": "write", "metadata": "read",
+        "contents": "write", "issues": "write", "pull_requests": "write", "metadata": "read",
       ], "core permission profile", &count)
     try expect(
       try PermissionProfile.setupValue(nil) == .core, "secure setup permission default", &count)
     try expectFailure("reject invalid setup permission profile", &count) {
       _ = try PermissionProfile.setupValue("unrestricted")
     }
-    let ciPermissions = PermissionProfile.ciRead.permissions
+    let developerPermissions = PermissionProfile.developer.permissions
     try expect(
-      ciPermissions["actions"] == "read" && ciPermissions["checks"] == "read"
-        && ciPermissions["statuses"] == "read", "CI permissions are read-only", &count)
+      developerPermissions["actions"] == "read" && developerPermissions["checks"] == "read"
+        && developerPermissions["code_quality"] == "read"
+        && developerPermissions["deployments"] == "read"
+        && developerPermissions["discussions"] == "read"
+        && developerPermissions["merge_queues"] == "read"
+        && developerPermissions["security_events"] == "read"
+        && developerPermissions["statuses"] == "read"
+        && developerPermissions["vulnerability_alerts"] == "read",
+      "developer permissions are read-only beyond core", &count)
     for deniedPermission in [
-      "administration", "workflows", "deployments", "environments", "secrets",
+      "administration", "workflows", "environments", "repository_advisories",
+      "secret_scanning_alerts", "secrets",
     ] {
-      try expect(ciPermissions[deniedPermission] == nil, "exclude \(deniedPermission)", &count)
+      try expect(
+        developerPermissions[deniedPermission] == nil, "exclude \(deniedPermission)", &count)
     }
     for command in [
       ["pr", "list"], ["pr", "view", "12"],
       ["pr", "create", "--head", "agent/test", "--title", "Title", "--body", "Body"],
+      ["issue", "create", "--title", "Title", "--body", "Body"],
+      ["issue", "comment", "12", "--body", "Body"], ["issue", "close", "12"],
     ] {
       _ = try CommandPolicy.validateGH(command)
       count += 1
@@ -71,6 +82,8 @@ enum SelfTest {
       ["api", "user"], ["pr", "merge", "12"], ["extension", "exec", "attacker/tool"],
       ["alias", "set", "leak", "!env"], ["pr", "create", "--fill"],
       ["pr", "comment", "12", "--body-file", "/etc/master.passwd"],
+      ["issue", "create", "--title", "Title", "--body-file", "/etc/master.passwd"],
+      ["issue", "comment", "12", "--body", "Body", "--edit-last"],
     ] {
       try expectFailure("reject gh command \(command.joined(separator: " "))", &count) {
         _ = try CommandPolicy.validateGH(command)

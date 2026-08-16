@@ -34,6 +34,9 @@ struct Configuration: Codable, Sendable {
     guard github.host == gitHubHost, github.appID > 0 else {
       throw AppError.config("host must be github.com and app ID must be positive")
     }
+    guard let permissionProfile, PermissionProfile(rawValue: permissionProfile) != nil else {
+      throw AppError.config("permission profile must be core or developer")
+    }
     for installation in installations {
       try Repository.validate(installation.owner)
       guard installation.installationID > 0, !installation.repositories.isEmpty else {
