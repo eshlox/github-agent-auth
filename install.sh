@@ -38,6 +38,8 @@ xcode-select -p >/dev/null 2>&1 || {
 temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/github-agent-auth.XXXXXX")
 source_directory="$temporary_directory/source"
 build_directory="$temporary_directory/build"
+module_cache="$build_directory/module-cache"
+clang_module_cache="$build_directory/clang-module-cache"
 
 git init -q "$source_directory"
 git -C "$source_directory" remote add origin "$repository"
@@ -46,10 +48,16 @@ git -C "$source_directory" checkout -q --detach FETCH_HEAD
 commit=$(git -C "$source_directory" rev-parse HEAD)
 
 echo "Building AgentAuth from commit $commit"
-DEVELOPER_DIR="$developer_directory" swift build -c release \
+DEVELOPER_DIR="$developer_directory" \
+  SWIFTPM_MODULECACHE_OVERRIDE="$module_cache" \
+  CLANG_MODULE_CACHE_PATH="$clang_module_cache" \
+  swift build -c release \
   --package-path "$source_directory" \
   --scratch-path "$build_directory"
-binary_directory=$(DEVELOPER_DIR="$developer_directory" swift build -c release \
+binary_directory=$(DEVELOPER_DIR="$developer_directory" \
+  SWIFTPM_MODULECACHE_OVERRIDE="$module_cache" \
+  CLANG_MODULE_CACHE_PATH="$clang_module_cache" \
+  swift build -c release \
   --package-path "$source_directory" \
   --scratch-path "$build_directory" \
   --show-bin-path)
