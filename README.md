@@ -1,5 +1,9 @@
 # AgentAuth for GitHub
 
+<p align="center">
+  <img src="docs/assets/agentauth-logo.png" alt="AgentAuth security robot" width="180">
+</p>
+
 AgentAuth gives local coding agents restricted Git and GitHub CLI access without exposing
 a reusable credential. It is native Swift for Apple Silicon macOS.
 
@@ -50,6 +54,12 @@ GITHUB_AGENT_AUTH_REF="$commit" sh /tmp/github-agent-auth-install.sh
 
 Setup opens GitHub to create a private GitHub App and install it on the current
 repository. It then asks for administrator approval.
+
+### GitHub App name
+
+Setup proposes a unique name based on the Mac. GitHub lets you edit it before creating
+the App. For organization installations, include the owner in the name so administrators
+know who operates it. For example, use `eshlox AgentAuth` or `Acme AgentAuth`.
 
 Setup installs:
 
