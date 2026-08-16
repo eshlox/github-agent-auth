@@ -15,12 +15,37 @@ This project is not affiliated with GitHub.
 
 ## Install
 
-After the first signed release:
+Download and inspect the installer before running it:
 
 ```sh
-brew install eshlox/tap/github-agent-auth
+curl -fsSLo /tmp/github-agent-auth-install.sh \
+  https://raw.githubusercontent.com/eshlox/github-agent-auth/main/install.sh
+less /tmp/github-agent-auth-install.sh
+sh /tmp/github-agent-auth-install.sh
+
+export PATH="$HOME/.local/bin:$PATH"
 cd ~/projects/my-repository
 github-agent-auth setup
+```
+
+The installer downloads the source, builds it with local Xcode, runs its security
+self-test, and installs the binary in `~/.local/bin`. It does not use `sudo`. Setup asks
+for administrator approval when it installs the privileged service.
+
+For a quick install:
+
+```sh
+curl -fsSL \
+  https://raw.githubusercontent.com/eshlox/github-agent-auth/main/install.sh | sh
+```
+
+For a reproducible install, replace `COMMIT_SHA` with a reviewed commit:
+
+```sh
+commit=COMMIT_SHA
+curl -fsSLo /tmp/github-agent-auth-install.sh \
+  "https://raw.githubusercontent.com/eshlox/github-agent-auth/$commit/install.sh"
+GITHUB_AGENT_AUTH_REF="$commit" sh /tmp/github-agent-auth-install.sh
 ```
 
 Setup opens GitHub to create a private GitHub App and install it on the current
@@ -97,10 +122,13 @@ Policy changes require administrator approval.
 After upgrading AgentAuth:
 
 ```sh
-brew upgrade github-agent-auth
+sh /tmp/github-agent-auth-install.sh
 github-agent-auth install-service
 github-agent-auth doctor
 ```
+
+Download the current installer again if `/tmp/github-agent-auth-install.sh` no longer
+exists. Pin `GITHUB_AGENT_AUTH_REF` to update to a specific commit.
 
 After upgrading your trusted GitHub CLI installation:
 
@@ -128,12 +156,12 @@ github-agent-auth permissions
 
 ```sh
 github-agent-auth uninstall
-brew uninstall github-agent-auth
+rm "$HOME/.local/bin/github-agent-auth"
 ```
 
 The first command removes all local broker state, privileged files, logs, shims, Git
-configuration, shell PATH changes, and the worker account. The second removes the
-Homebrew package. Remove the GitHub App separately in GitHub settings.
+configuration, shell PATH changes, and the worker account. The second removes the local
+binary. Remove the GitHub App separately in GitHub settings.
 
 ## How it is secured
 
@@ -152,7 +180,7 @@ rulesets, and never give the App bypass permission.
 
 Read [SECURITY.md](SECURITY.md) for the complete threat model and security decisions.
 
-## Build from source
+## Build manually
 
 ```sh
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
@@ -161,6 +189,6 @@ cd ~/projects/my-repository
 .build/release/github-agent-auth setup
 ```
 
-Public releases are Developer ID signed and notarized. Prefer them for normal use.
-
-Release maintainers should follow [docs/local-release.md](docs/local-release.md).
+No prebuilt binaries are published. See [SECURITY.md](SECURITY.md) for the source-install
+trust model. Future release maintainers should follow
+[docs/local-release.md](docs/local-release.md).

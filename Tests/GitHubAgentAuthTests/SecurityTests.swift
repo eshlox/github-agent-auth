@@ -122,6 +122,17 @@ final class SecurityTests: XCTestCase {
     }
   }
 
+  func testSourceInstallerDoesNotDownloadAsRoot() throws {
+    let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+      .deletingLastPathComponent().deletingLastPathComponent()
+    let script = try String(contentsOf: root.appendingPathComponent("install.sh"), encoding: .utf8)
+    XCTAssertTrue(script.contains("GITHUB_AGENT_AUTH_REF"))
+    XCTAssertTrue(script.contains("codesign --verify --strict"))
+    XCTAssertTrue(script.contains("self-test"))
+    XCTAssertFalse(script.contains("sudo"))
+    XCTAssertFalse(script.contains("curl"))
+  }
+
   func testProjectURLMatchesRepository() {
     XCTAssertEqual(projectURL, "https://github.com/eshlox/github-agent-auth")
   }

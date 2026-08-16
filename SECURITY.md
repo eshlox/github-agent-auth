@@ -7,8 +7,7 @@ Use GitHub private vulnerability reporting. Do not open a public issue.
 Include the AgentAuth version, macOS version, reproduction steps, and relevant signature,
 checksum, or Gatekeeper output. Never include keys, tokens, or authorization headers.
 
-Only the latest published release receives security fixes. Supported releases have a
-Developer ID signed and notarized archive, checksum, and reviewed Homebrew formula.
+Security fixes are made on `main`. No prebuilt binaries are currently published.
 
 ## Goal
 
@@ -144,22 +143,31 @@ not logged. Malformed requests rejected before policy evaluation are not logged.
 The log is root-owned with mode `0600`. It is not tamper-proof against root and is removed
 by uninstall.
 
-### Signed releases
+### Source distribution
 
-Published releases are built on a dedicated Apple Silicon Mac, Developer ID signed,
-notarized, Gatekeeper checked, checksummed, and distributed through a reviewed Homebrew
-formula. Source builds do not provide the same publisher verification.
+The supported installer fetches source over HTTPS, optionally at an exact commit, and
+builds it with the local Xcode toolchain. It runs `codesign --verify --strict` and the
+security self-test before installing the binary in the user's `~/.local/bin`.
+
+This provides source transparency and avoids trusting an unsigned prebuilt binary. It
+does not prove Apple publisher identity. The local ad-hoc code signature checks binary
+integrity, not who published it. Review the installer and pin a reviewed commit when that
+distinction matters.
+
+Never run the installer with `sudo`. Only the locally built `github-agent-auth setup`
+command should request administrator approval. Do not redistribute prebuilt binaries
+until they are Developer ID signed, notarized, checksummed, and verified on a clean Mac.
 
 ### Explicit uninstall
 
 ```sh
 github-agent-auth uninstall
-brew uninstall github-agent-auth
+rm "$HOME/.local/bin/github-agent-auth"
 ```
 
 The first command removes local broker state, privileged files, logs, worker directories,
 the service account and group, Git configuration, shims, and setup's shell PATH block.
-Cleanup errors fail the command. The second command removes the Homebrew package.
+Cleanup errors fail the command. The second command removes the local binary.
 
 The GitHub App is external and may be shared, so uninstall does not delete it. Remove it
 in GitHub settings to revoke it fully.
@@ -167,6 +175,7 @@ in GitHub settings to revoke it fully.
 ## Operator checklist
 
 - Keep macOS, Xcode Command Line Tools, GitHub CLI, and AgentAuth updated.
+- Review `install.sh` and pin a commit for reproducible installation.
 - Install GitHub CLI from a trusted channel.
 - Review the path printed by `update-gh` before approving sudo.
 - Do not configure passwordless sudo for AgentAuth.
