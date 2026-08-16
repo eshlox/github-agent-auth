@@ -51,13 +51,13 @@ echo "Building AgentAuth from commit $commit"
 DEVELOPER_DIR="$developer_directory" \
   SWIFTPM_MODULECACHE_OVERRIDE="$module_cache" \
   CLANG_MODULE_CACHE_PATH="$clang_module_cache" \
-  swift build -c release \
+  swift build -c release --disable-sandbox \
   --package-path "$source_directory" \
   --scratch-path "$build_directory"
 binary_directory=$(DEVELOPER_DIR="$developer_directory" \
   SWIFTPM_MODULECACHE_OVERRIDE="$module_cache" \
   CLANG_MODULE_CACHE_PATH="$clang_module_cache" \
-  swift build -c release \
+  swift build -c release --disable-sandbox \
   --package-path "$source_directory" \
   --scratch-path "$build_directory" \
   --show-bin-path)
