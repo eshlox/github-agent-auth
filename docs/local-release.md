@@ -1,5 +1,8 @@
 # Local signed release
 
+Use this process only when the project starts publishing prebuilt binaries. Current
+installations build directly from source.
+
 Release from a dedicated, FileVault-protected Apple Silicon Mac. Keep the Developer ID
 private key in that Mac's login Keychain. Do not upload Apple credentials to GitHub.
 
