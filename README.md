@@ -192,3 +192,7 @@ cd ~/projects/my-repository
 No prebuilt binaries are published. See [SECURITY.md](SECURITY.md) for the source-install
 trust model. Future release maintainers should follow
 [docs/local-release.md](docs/local-release.md).
+
+## License
+
+[Apache License 2.0](LICENSE)
