@@ -7,6 +7,18 @@ let gitHubHost = "github.com"
 let apiBase = URL(string: "https://api.github.com")!
 let projectURL = "https://github.com/eshlox/github-agent-auth"
 
+func currentExecutableURL() throws -> URL {
+  var size: UInt32 = 0
+  _ = _NSGetExecutablePath(nil, &size)
+  var buffer = [CChar](repeating: 0, count: Int(size))
+  guard _NSGetExecutablePath(&buffer, &size) == 0 else {
+    throw AppError.config("could not locate the current executable")
+  }
+  let path = String(
+    decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+  return URL(fileURLWithPath: path).resolvingSymlinksInPath()
+}
+
 func brokerWorkerIdentity() throws -> (uid: uid_t, gid: gid_t) {
   guard let account = getpwnam(serviceAccount), account.pointee.pw_uid != 0 else {
     throw AppError.config("isolated broker service account is unavailable")
