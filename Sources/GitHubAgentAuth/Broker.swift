@@ -439,7 +439,7 @@ enum BrokerClient {
     }
     try sendFrame(.standardInput, Data("capabilities\n".utf8), to: descriptor)
     try discardRemoteCapabilities(descriptor)
-    print("stateless-connect\n")
+    try FileHandle.standardOutput.write(contentsOf: Data("stateless-connect\n\n".utf8))
     DispatchQueue.global().async {
       while true {
         do {

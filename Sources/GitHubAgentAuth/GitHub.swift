@@ -1,6 +1,11 @@
 import Foundation
 import Security
 
+struct VerifiedInstallation: Sendable {
+  let id: UInt64
+  let owner: String
+}
+
 struct InstallationToken: Sendable {
   let value: String, expiresAt: String, cacheUntil: Date
 }
@@ -15,10 +20,21 @@ func validate(response: URLResponse, data: Data, operation: String) throws {
   guard ![301, 302, 303, 307, 308].contains(http.statusCode) else {
     throw AppError.github("\(operation) redirect refused")
   }
-  guard (200..<300).contains(http.statusCode) else {
-    throw AppError.github("\(operation) failed with HTTP \(http.statusCode)")
-  }
   guard data.count <= 65_536 else { throw AppError.github("\(operation) response exceeded 64 KiB") }
+  guard (200..<300).contains(http.statusCode) else {
+    let message = githubErrorMessage(from: data)
+    let detail = message.map { ": \($0)" } ?? ""
+    throw AppError.github("\(operation) failed with HTTP \(http.statusCode)\(detail)")
+  }
+}
+
+private func githubErrorMessage(from data: Data) -> String? {
+  guard
+    let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+    let message = object["message"] as? String,
+    !message.isEmpty
+  else { return nil }
+  return message
 }
 
 enum GitHubClient {

@@ -89,24 +89,6 @@ enum SelfTest {
         _ = try CommandPolicy.validateGH(command)
       }
     }
-    let server = try LoopbackHTTPServer()
-    let wrongURL = server.baseURL.appending(path: "callback").appending(queryItems: [
-      URLQueryItem(name: "state", value: "wrong")
-    ])
-    let expectedURL = server.baseURL.appending(path: "callback").appending(queryItems: [
-      URLQueryItem(name: "state", value: "expected")
-    ])
-    DispatchQueue.global().async {
-      _ = try? Data(contentsOf: wrongURL)
-      _ = try? Data(contentsOf: expectedURL)
-    }
-    let callback = try server.waitForRequest(
-      timeout: 3,
-      matching: {
-        $0.path == "/callback" && $0.query["state"] == "expected"
-      },
-      handler: { _ in "ok" })
-    try expect(callback.query["state"] == "expected", "loopback callback state", &count)
     print("Self-test passed: \(count) security checks")
   }
 

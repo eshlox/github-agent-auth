@@ -22,8 +22,11 @@ It protects:
 - Broker audit records from the configured user
 
 It does not protect the configured user's local files, source tree, Git history, terminal
-output, or other accounts. Software running as that user can request every operation the
-policy allows.
+output, or other accounts. AgentAuth authenticates the macOS user, not a particular
+application: every process running as the configured user can request every operation the
+policy allows. Those processes cannot normally retrieve the App key or installation
+token, but they can use the broker to act on every allowlisted repository within the
+configured command and permission limits.
 
 ## Trust assumptions
 
@@ -71,6 +74,19 @@ client UID.
 
 The broker trusts the peer UID reported by macOS, not a username, path, environment
 variable, or client claim. The socket performs operations and never acts as a token API.
+
+### User boundary, not application boundary
+
+The socket accepts any process whose kernel-reported UID matches the user recorded during
+setup. It does not distinguish a coding agent from another application, shell, script, or
+malicious process running as that user. Any such process can invoke allowed Git and GitHub
+operations by using the wrappers or speaking the broker protocol directly.
+
+AgentAuth limits the resulting access to configured repositories, commands, and
+permissions, and it withholds reusable credentials. It does not provide per-application
+authorization or prevent same-user software from exercising those allowed capabilities.
+Adding that boundary would require a separate client identity and approval model, such as
+validated macOS audit tokens and pinned code-signing requirements.
 
 ### Scoped installation tokens
 
@@ -153,17 +169,19 @@ by uninstall.
 
 ### Source distribution
 
-The supported installer fetches source over HTTPS, optionally at an exact commit, and
-builds it with the local Xcode toolchain. It runs `codesign --verify --strict` and the
-security self-test before installing the binary in the user's `~/.local/bin`.
+The documented installation process clones the source, optionally checks out an exact
+reviewed commit, and builds it with the local Xcode toolchain. It runs
+`codesign --verify --strict` and the security self-test before installing the binary in
+the user's `~/.local/bin`.
 
 This provides source transparency and avoids trusting an unsigned prebuilt binary. It
 does not prove Apple publisher identity. The local ad-hoc code signature checks binary
-integrity, not who published it. Review the installer and pin a reviewed commit when that
+integrity, not who published it. Review the source and pin a reviewed commit when that
 distinction matters.
 
-Never run the installer with `sudo`. Only the locally built `github-agent-auth setup`
-command should request administrator approval. Do not redistribute prebuilt binaries
+Never build or install the user-facing binary with `sudo`. Only the locally built
+`github-agent-auth setup` command should request administrator approval. Do not
+redistribute prebuilt binaries
 until they are Developer ID signed, notarized, checksummed, and verified on a clean Mac.
 
 ### Explicit uninstall
@@ -182,8 +200,8 @@ in GitHub settings to revoke it fully.
 
 ## Operator checklist
 
-- Keep macOS, Xcode Command Line Tools, GitHub CLI, and AgentAuth updated.
-- Review `install.sh` and pin a commit for reproducible installation.
+- Keep macOS, Xcode, GitHub CLI, and AgentAuth updated.
+- Review the source and pin a commit for reproducible installation.
 - Install GitHub CLI from a trusted channel.
 - Review the path printed by `update-gh` before approving sudo.
 - Do not configure passwordless sudo for AgentAuth.

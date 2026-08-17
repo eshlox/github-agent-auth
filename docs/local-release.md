@@ -131,7 +131,10 @@ Use a disposable private repository and GitHub App:
 
 ```sh
 cd /path/to/disposable-repository
-github-agent-auth setup
+github-agent-auth setup \
+  --app-id APP_ID \
+  --installation-id INSTALLATION_ID \
+  --private-key /path/to/disposable-app.private-key.pem
 github-agent-auth doctor
 github-agent-auth update-gh
 git fetch

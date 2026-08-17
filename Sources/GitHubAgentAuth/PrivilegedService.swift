@@ -125,10 +125,15 @@ enum PrivilegedService {
   ]
 
   static func invoke(_ arguments: [String], standardInput: Data? = nil) throws {
-    let executable = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+    let executable = try currentExecutableURL()
+    guard isatty(STDIN_FILENO) == 1 else {
+      throw AppError.config("administrator authentication requires an interactive terminal")
+    }
+    try authenticateAdministrator()
+
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-    process.arguments = [executable.path] + arguments
+    process.arguments = ["-n", executable.path] + arguments
     if let standardInput {
       let pipe = Pipe()
       process.standardInput = pipe
@@ -141,6 +146,31 @@ enum PrivilegedService {
     process.waitUntilExit()
     guard process.terminationStatus == 0 else {
       throw AppError.config("privileged operation failed")
+    }
+  }
+
+  private static func authenticateAdministrator() throws {
+    var arguments: [UnsafeMutablePointer<CChar>?] = [
+      strdup("/usr/bin/sudo"), strdup("-v"), nil,
+    ]
+    defer { arguments.dropLast().forEach { free($0) } }
+    var environment = ProcessInfo.processInfo.environment.map { strdup("\($0.key)=\($0.value)") }
+      + [nil]
+    defer { environment.dropLast().forEach { free($0) } }
+    var processID: pid_t = 0
+    let spawnStatus = arguments.withUnsafeMutableBufferPointer { buffer in
+      environment.withUnsafeMutableBufferPointer { environmentBuffer in
+        posix_spawn(
+          &processID, "/usr/bin/sudo", nil, nil, buffer.baseAddress!,
+          environmentBuffer.baseAddress!)
+      }
+    }
+    guard spawnStatus == 0 else {
+      throw AppError.system("start administrator authentication", spawnStatus)
+    }
+    var status: Int32 = 0
+    guard waitpid(processID, &status, 0) == processID, status == 0 else {
+      throw AppError.config("administrator authentication failed")
     }
   }
 
@@ -175,6 +205,9 @@ enum PrivilegedService {
     }
     try FileManager.default.copyItem(at: source, to: temporary)
     do {
+      guard chown(temporary.path, 0, 0) == 0 else {
+        throw AppError.system("set privileged executable owner", errno)
+      }
       try setMode(temporary.path, 0o755)
       let signature = try runProcess("/usr/bin/codesign", ["--verify", "--strict", temporary.path])
       guard signature.0 == 0 else {

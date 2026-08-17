@@ -39,7 +39,7 @@ import Foundation
         InstallPayload.self, from: FileHandle.standardInput.readDataToEndOfFile())
       try PrivilegedService.install(
         payload: payload,
-        sourceBinary: URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath())
+        sourceBinary: try currentExecutableURL())
     case "privileged-update":
       guard let operation = arguments.first else {
         throw AppError.config("missing update operation")
@@ -50,7 +50,7 @@ import Foundation
         throw AppError.config("missing GitHub CLI source")
       }
       try PrivilegedService.refresh(
-        sourceBinary: URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath(),
+        sourceBinary: try currentExecutableURL(),
         ghSource: URL(fileURLWithPath: arguments[1]).resolvingSymlinksInPath())
     case "privileged-update-gh":
       guard arguments.count == 2, arguments[0] == "--gh-source" else {
@@ -69,21 +69,37 @@ import Foundation
     guard !FileManager.default.fileExists(atPath: Paths.config.path) else {
       throw AppError.config("already configured; use `repo add` or uninstall first")
     }
+    try validateOptions(
+      arguments,
+      allowed: [
+        "--app-id", "--installation-id", "--private-key", "--repository", "--permissions",
+      ])
     let repository =
       try option("--repository", arguments).map(Repository.init)
       ?? GitIntegration.currentRepository()
     let profile = try PermissionProfile.setupValue(option("--permissions", arguments))
-    let organization = option("--organization", arguments)
+    guard let appID = UInt64(try requiredOption("--app-id", arguments)), appID > 0 else {
+      throw AppError.config("--app-id must be a positive integer")
+    }
+    guard
+      let installationID = UInt64(try requiredOption("--installation-id", arguments)),
+      installationID > 0
+    else { throw AppError.config("--installation-id must be a positive integer") }
+    let privateKeyPath = NSString(
+      string: try requiredOption("--private-key", arguments)
+    ).expandingTildeInPath
+    let pem = try Data(contentsOf: URL(fileURLWithPath: privateKeyPath))
     let gh = try requiredTool("gh", excluding: Paths.ghWrapper)
     let remoteHTTP = try gitRemoteHTTP()
     print("Repository: \(repository)\nPermissions: \(profile.summary)")
-    let (app, verifiedInstallation) = try ManifestFlow.createApp(
-      for: repository, profile: profile, organization: organization)
-    let pem = Data(app.pem.utf8)
-    _ = try GitHubClient.makeJWT(appID: app.id, pem: pem)
+    let verifiedInstallation = try blockingAsync {
+      try await GitHubClient.verifyInstallation(
+        appID: appID, pem: pem, installationID: installationID,
+        repository: repository, profile: profile)
+    }
     let config = Configuration(
       allowedUID: getuid(), allowedGID: getgid(), workerUID: 1, workerGID: 1,
-      github: .init(host: gitHubHost, appID: app.id),
+      github: .init(host: gitHubHost, appID: appID),
       installations: [
         .init(
           owner: verifiedInstallation.owner, installationID: verifiedInstallation.id,
@@ -100,6 +116,9 @@ import Foundation
     try offerShellPathUpdate()
     print(
       "Setup complete for \(repository).\nBroker: root-owned LaunchDaemon\nGitHub tokens: broker-only, short-lived, one repository"
+    )
+    print(
+      "Delete the original private key after `github-agent-auth doctor` succeeds: \(privateKeyPath)"
     )
   }
 
@@ -193,7 +212,7 @@ import Foundation
   }
 
   private static func installWrappers() throws {
-    let executable = currentExecutable()
+    let executable = try currentExecutableURL()
     for wrapper in [Paths.ghWrapper, Paths.gitRemoteWrapper] {
       try FileManager.default.createDirectory(
         at: wrapper.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -244,15 +263,16 @@ import Foundation
 
   private static func doctor() throws {
     let config = try Configuration.load()
+    let executable = try currentExecutableURL()
     var failed = false
     check("configuration is root-owned and valid", true, &failed)
     check("GitHub host fixed to github.com", config.github.host == gitHubHost, &failed)
     check("broker responds for current UID", (try? BrokerClient.ping()) != nil, &failed)
     check("privileged broker is root-owned", protectedExecutable(Paths.privilegedBinary), &failed)
     check("protected GitHub CLI is root-owned", protectedExecutable(Paths.privilegedGH), &failed)
-    check("gh wrapper installed", symlink(Paths.ghWrapper, targets: currentExecutable()), &failed)
+    check("gh wrapper installed", symlink(Paths.ghWrapper, targets: executable), &failed)
     check(
-      "Git remote helper installed", symlink(Paths.gitRemoteWrapper, targets: currentExecutable()),
+      "Git remote helper installed", symlink(Paths.gitRemoteWrapper, targets: executable),
       &failed)
     let rewrite = try runProcess(
       "/usr/bin/git",
@@ -272,7 +292,7 @@ import Foundation
         "config", "--global", "--unset-all",
         "url.agentauth::https://github.com/.insteadOf",
       ])
-    let executable = currentExecutable()
+    let executable = try currentExecutableURL()
     for wrapper in [Paths.ghWrapper, Paths.gitRemoteWrapper]
     where symlink(wrapper, targets: executable) { try FileManager.default.removeItem(at: wrapper) }
     try removeShellPathEntries()
@@ -311,9 +331,6 @@ import Foundation
     }
     return path.resolvingSymlinksInPath()
   }
-  private static func currentExecutable() -> URL {
-    URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
-  }
   private static func symlink(_ path: URL, targets target: URL) -> Bool {
     (try? FileManager.default.destinationOfSymbolicLink(atPath: path.path)) == target.path
   }
@@ -340,11 +357,31 @@ import Foundation
     }
     return arguments[index + 1]
   }
+  private static func requiredOption(_ name: String, _ arguments: [String]) throws -> String {
+    guard let value = option(name, arguments) else {
+      throw AppError.config("missing required option \(name)")
+    }
+    return value
+  }
+  private static func validateOptions(_ arguments: [String], allowed: Set<String>) throws {
+    guard arguments.count.isMultiple(of: 2) else {
+      throw AppError.config("every setup option requires a value")
+    }
+    var seen = Set<String>()
+    for index in stride(from: 0, to: arguments.count, by: 2) {
+      let name = arguments[index]
+      guard allowed.contains(name) else { throw AppError.config("unknown setup option: \(name)") }
+      guard seen.insert(name).inserted else {
+        throw AppError.config("duplicate setup option: \(name)")
+      }
+    }
+  }
   private static func printUsage() {
     print(
       """
       Usage:
-        github-agent-auth setup [--permissions core|developer] [--organization OWNER]
+        github-agent-auth setup --app-id ID --installation-id ID --private-key PATH
+          [--repository OWNER/REPO] [--permissions core|developer]
         github-agent-auth install-service
         github-agent-auth update-gh
         github-agent-auth repo add|remove [--repository OWNER/REPO]
@@ -353,7 +390,8 @@ import Foundation
         github-agent-auth list|status|doctor|self-test
         github-agent-auth uninstall
 
-      Run setup inside the first repository you want to authorize.
+      Create and install the private GitHub App manually, then run setup inside the first
+      repository you want to authorize.
       """)
   }
 }
